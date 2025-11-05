@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/metric"
@@ -15,12 +14,12 @@ import (
 )
 
 type Application struct {
-	meter                  metric.Meter
-	requestCounter         metric.Int64Counter
-	responseTimeHistogram  metric.Float64Histogram
-	activeUsersGauge       metric.Int64ObservableGauge
-	errorCounter           metric.Int64Counter
-	queueSizeUpDownCounter metric.Int64UpDownCounter
+	meter                   metric.Meter
+	requestCounter          metric.Int64Counter
+	responseTimeHistogram   metric.Float64Histogram
+	activeUsersGauge        metric.Int64ObservableGauge
+	errorCounter            metric.Int64Counter
+	queueSizeUpDownCounter  metric.Int64UpDownCounter
 }
 
 func NewApplication(meter metric.Meter) *Application {
@@ -137,23 +136,23 @@ func main() {
 	go app.simulateWorkload()
 
 	// HTTP endpoint для метрик
-	http.Handle("/metrics", promhttp.Handler())
-
+	http.Handle("/metrics", exporter)
+	
 	// Дополнительный endpoint для тестирования
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-
+		
 		// Имитация обработки
 		time.Sleep(time.Duration(10+time.Now().Nanosecond()%90) * time.Millisecond)
-
+		
 		status := 200
 		if time.Now().Nanosecond()%10 == 0 { // 10% ошибок
 			status = 500
 		}
-
+		
 		w.WriteHeader(status)
 		fmt.Fprintf(w, "Hello! Status: %d", status)
-
+		
 		// Записываем метрику
 		app.HandleRequest(r.Method, r.URL.Path, status, time.Since(start))
 	})
