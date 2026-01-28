@@ -7,9 +7,9 @@ services:
     ports:
       - 9090:9090
     volumes:
-      - ./prometheus_data/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus.yaml:/etc/prometheus/prometheus.yaml
     command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--config.file=/etc/prometheus/prometheus.yaml'
 
   grafana:
     image: grafana/grafana
@@ -17,7 +17,7 @@ services:
     ports:
       - 3000:3000
     volumes:
-      - grafana_data:/var/lib/grafana
+      - ./grafana_data:/var/lib/grafana
 
 volumes:
   prometheus_data:
@@ -32,7 +32,7 @@ volumes:
       o: bind
       type: none
       device: ./grafana_data
-  postgres_data:
+  # postgres_data:
 
 networks:
   default: 

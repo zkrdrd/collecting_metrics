@@ -1,178 +1,118 @@
 package main
 
 import (
-	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/prometheus"
-	"go.opentelemetry.io/otel/metric"
-	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric"
+
+	"collecting_metrics/metrics"
 )
 
-type Application struct {
-	meter                  metric.Meter
-	requestCounter         metric.Int64Counter
-	responseTimeHistogram  metric.Float64Histogram
-	activeUsersGauge       metric.Int64ObservableGauge
-	errorCounter           metric.Int64Counter
-	queueSizeUpDownCounter metric.Int64UpDownCounter
-}
-
-func NewApplication(meter metric.Meter) *Application {
-	app := &Application{meter: meter}
-	app.initMetrics()
-	return app
-}
-
-func (app *Application) initMetrics() {
-	var err error
-
-	// Counter с атрибутами
-	app.requestCounter, err = app.meter.Int64Counter(
-		"http_requests_total",
-		metric.WithDescription("Total HTTP requests by method and status"),
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Histogram с атрибутами
-	app.responseTimeHistogram, err = app.meter.Float64Histogram(
-		"http_response_time_seconds",
-		metric.WithDescription("HTTP response time by endpoint"),
-		metric.WithUnit("s"),
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Observable Gauge
-	app.activeUsersGauge, err = app.meter.Int64ObservableGauge(
-		"active_users",
-		metric.WithDescription("Current number of active users"),
-		metric.WithInt64Callback(app.observeActiveUsers),
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Error counter
-	app.errorCounter, err = app.meter.Int64Counter(
-		"errors_total",
-		metric.WithDescription("Total errors by type"),
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// UpDownCounter для размера очереди
-	app.queueSizeUpDownCounter, err = app.meter.Int64UpDownCounter(
-		"queue_size",
-		metric.WithDescription("Current queue size"),
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-func (app *Application) observeActiveUsers(ctx context.Context, observer metric.Int64Observer) error {
-	// В реальном приложении здесь была бы логика получения количества активных пользователей
-	activeUsers := int64(time.Now().Second() % 100)
-	observer.Observe(activeUsers)
-	return nil
-}
-
-func (app *Application) HandleRequest(method, endpoint string, statusCode int, duration time.Duration) {
-	// Атрибуты для метрик
-	attrs := []attribute.KeyValue{
-		attribute.String("method", method),
-		attribute.String("endpoint", endpoint),
-		attribute.Int("status", statusCode),
-	}
-
-	// Увеличиваем счетчик запросов
-	app.requestCounter.Add(context.Background(), 1, metric.WithAttributes(attrs...))
-
-	// Записываем время ответа
-	app.responseTimeHistogram.Record(context.Background(), duration.Seconds(),
-		metric.WithAttributes(attribute.String("endpoint", endpoint)))
-
-	// Логика для ошибок
-	if statusCode >= 400 {
-		errorAttrs := []attribute.KeyValue{
-			attribute.String("type", "http_error"),
-			attribute.Int("code", statusCode),
-		}
-		app.errorCounter.Add(context.Background(), 1, metric.WithAttributes(errorAttrs...))
-	}
-}
-
-func (app *Application) UpdateQueueSize(delta int64) {
-	app.queueSizeUpDownCounter.Add(context.Background(), delta)
-}
-
 func main() {
-	// Настройка экспортера
+	// Инициализация контекста
+	// ctx := context.Background()
+
+	// Инициализация Prometheus экспортера
 	exporter, err := prometheus.New()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to create Prometheus exporter: %v", err)
 	}
 
-	provider := sdkmetric.NewMeterProvider(
-		sdkmetric.WithReader(exporter.Reader),
+	// Создание провайдера метрик
+	provider := metric.NewMeterProvider(
+		metric.WithReader(exporter),
 	)
-	defer provider.Shutdown(context.Background())
 
-	meter := provider.Meter("myapp")
+	// Установка глобального провайдера
+	otel.SetMeterProvider(provider)
 
-	// Создаем приложение
-	app := NewApplication(meter)
+	// Создание сборщика метрик
+	collector := metrics.NewMetricsCollector(
+		"golang-service-name",
+		"production",
+		"instance-1",
+	)
 
-	// Запускаем симуляцию
-	go app.simulateWorkload()
+	// Инициализация метрик
+	if err := collector.InitMetrics(); err != nil {
+		log.Fatalf("Failed to init metrics: %v", err)
+	}
 
-	// HTTP endpoint для метрик
-	http.Handle("/metrics", promhttp.Handler())
+	// Регистрация callback'ов
+	if err := collector.Register(); err != nil {
+		log.Fatalf("Failed to register metrics: %v", err)
+	}
 
-	// Дополнительный endpoint для тестирования
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
+	log.Println("Metrics collector initialized successfully")
+	log.Printf("Service uptime: %v", collector.GetUptime())
 
-		// Имитация обработки
-		time.Sleep(time.Duration(10+time.Now().Nanosecond()%90) * time.Millisecond)
+	// Запуск HTTP сервера для Prometheus
+	go func() {
+		// Используем стандартный HTTP handler от Prometheus экспортера
+		log.Println("Starting metrics server on :8080")
 
-		status := 200
-		if time.Now().Nanosecond()%10 == 0 { // 10% ошибок
-			status = 500
+		http.Handle("/metrics", promhttp.Handler())
+		if err := http.ListenAndServe(":8080", nil); err != nil {
+			log.Fatalf("Failed to start metrics server: %v", err)
 		}
+	}()
 
-		w.WriteHeader(status)
-		fmt.Fprintf(w, "Hello! Status: %d", status)
+	// Демонстрационная нагрузка для сбора метрик
+	go generateLoad()
 
-		// Записываем метрику
-		app.HandleRequest(r.Method, r.URL.Path, status, time.Since(start))
-	})
-
-	fmt.Println("Server started on :8080")
-	fmt.Println("Metrics available at http://localhost:8080/metrics")
-	log.Fatal(http.ListenAndServe(":8080", nil))
-}
-
-func (app *Application) simulateWorkload() {
-	ticker := time.NewTicker(5 * time.Second)
+	// Основной цикл приложения
+	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			// Имитация изменения размера очереди
-			delta := int64(time.Now().Nanosecond()%20 - 10)
-			app.UpdateQueueSize(delta)
+			log.Printf("Uptime: %v", collector.GetUptime())
+
+			// Сбор и вывод текущих метрик
+			memMetrics, cpuMetrics, runtimeMetrics := metrics.CollectSystemMetrics()
+			log.Printf("Goroutines: %d, HeapAlloc: %d MB",
+				cpuMetrics.Goroutines,
+				memMetrics.HeapAlloc/(1024*1024))
+			log.Printf("GC Cycles: %d, Total Pause: %.2f ms",
+				runtimeMetrics.NumGC,
+				float64(runtimeMetrics.PauseTotalNs)/1e6)
+		}
+	}
+}
+
+// generateLoad создает нагрузку для демонстрации метрик
+func generateLoad() {
+	for i := 0; i < 100; i++ {
+		go func(id int) {
+			data := make([]byte, 1024*1024) // 1MB
+			for {
+				// Простая нагрузка
+				for j := range data {
+					data[j] = byte((j + id) % 256)
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+		}(i)
+	}
+
+	// Периодически создаем новые горутины
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	counter := 100
+	for range ticker.C {
+		go func(id int) {
+			time.Sleep(30 * time.Second)
+		}(counter)
+		counter++
+		if counter%10 == 0 {
+			log.Printf("Created %d goroutines", counter)
 		}
 	}
 }
