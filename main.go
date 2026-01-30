@@ -32,24 +32,24 @@ func main() {
 	otel.SetMeterProvider(provider)
 
 	// Создание сборщика метрик
-	collector := metrics.NewMetricsCollector(
-		"golang-service-name",
-		"production",
-		"instance-1",
-	)
+	// collector := metrics.NewMetricsCollector(
+	// 	"golang-service-name",
+	// 	"production",
+	// 	"instance-1",
+	// )
 
 	// Инициализация метрик
-	if err := collector.InitMetrics(); err != nil {
-		log.Fatalf("Failed to init metrics: %v", err)
-	}
+	// if err := collector.InitMetrics(); err != nil {
+	// 	log.Fatalf("Failed to init metrics: %v", err)
+	// }
 
-	// Регистрация callback'ов
-	if err := collector.Register(); err != nil {
-		log.Fatalf("Failed to register metrics: %v", err)
-	}
+	// // Регистрация callback'ов
+	// if err := collector.Register(); err != nil {
+	// 	log.Fatalf("Failed to register metrics: %v", err)
+	// }
 
-	log.Println("Metrics collector initialized successfully")
-	log.Printf("Service uptime: %v", collector.GetUptime())
+	// log.Println("Metrics collector initialized successfully")
+	// log.Printf("Service uptime: %v", collector.GetUptime())
 
 	// Запуск HTTP сервера для Prometheus
 	go func() {
@@ -72,7 +72,7 @@ func main() {
 	for {
 		select {
 		case <-ticker.C:
-			log.Printf("Uptime: %v", collector.GetUptime())
+			// log.Printf("Uptime: %v", collector.GetUptime())
 
 			// Сбор и вывод текущих метрик
 			memMetrics, cpuMetrics, runtimeMetrics := metrics.CollectSystemMetrics()
